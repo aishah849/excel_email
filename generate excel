@@ -1,0 +1,133 @@
+function main(workbook: ExcelScript.Workbook): myOutput {
+  
+  // Get all the sheets
+  let sheets = workbook.getWorksheets();
+  
+  // Access the table in the workbook
+  let table = workbook.getTable("OfficeForms.Table");
+
+  // Get the range containing the table data
+  let dataRange = table.getRangeBetweenHeaderAndTotal();
+  let tableData = dataRange.getValues();
+
+  // Get current date and time in UTC
+  let todayUTC = new Date();
+  
+  // Add 8 hours to UTC time
+  let todayGMT8 = new Date(todayUTC.getTime() + (8 * 60 * 60 * 1000)); 
+  // Set time to midnight for comparison
+  todayGMT8.setHours(0, 0, 0, 0);
+  // console.log("GMT 8 " + todayGMT8)
+  
+  // // Add 0 hours to UTC time
+  // let todayGMT0 = new Date(todayUTC.getTime() + (0 * 60 * 60 * 1000)); 
+  // // Set time to midnight for comparison
+  // todayGMT0.setHours(0, 0, 0, 0); 
+  // // console.log("GMT 0 " + todayGMT0)
+
+  // Initialize the HTML email body and row count
+  let emailBody = "<h2>Daily Report</h2>";
+  emailBody += "<p><strong>Date:</strong> " + formatExcelDate(todayGMT8.getTime() / 86400000 + 25569) + "</p>";
+  let rowsSelected = 0;
+
+  deleteExistingSheets(sheets)
+
+  // Initialize a map to store the latest entry for each user
+  let latestEntries: Entry = {};
+
+  // Iterate through the table rows
+  tableData.forEach((row, index) => {
+    // Parse and format the date from the first column
+    let excelDate = row[5] as number; // Assuming the date is in the 6th column
+    let rowDate = new Date((excelDate - 25569) * 86400 * 1000); // Convert Excel date to JS date
+    rowDate.setHours(0, 0, 0, 0); // Set time to midnight for comparison
+    
+    if (rowDate.getTime() === todayGMT8.getTime()) {
+      console.log("row Time " + rowDate)
+      let userName = row[6] as string; // Assuming the name is in the 7th column
+      let currentEntryTime = new Date((row[1] as number - 25569) * 86400 * 1000).getTime(); // Convert to JS date and get time
+
+      // If this is the latest entry for the user, update the map
+      if (!latestEntries[userName] || currentEntryTime > new Date((latestEntries[userName][1] as number - 25569) * 86400 * 1000).getTime()) {
+        latestEntries[userName] = row.map(cell => typeof cell === 'boolean' ? Number(cell) : cell) as (string | number)[];
+      }
+
+    }
+  });
+
+  console.log(latestEntries)
+
+  // Process the latest entries
+  for (let userName in latestEntries) {
+    let row = latestEntries[userName];
+
+    emailBody += "<p><strong>Name:</strong> " + row[6] + "<br>";
+    emailBody += "<strong>Attendance Status:</strong> " + row[7] + "<br>";
+    emailBody += "--------------------------------------------";
+
+    // Duplicate the template sheet
+    let templateSheet = workbook.getWorksheet("Template");
+    if (templateSheet) {
+      let newSheet = templateSheet.copy(ExcelScript.WorksheetPositionType.after, templateSheet);
+      // Replace invalid characters with an underscore
+      let sanitizedUserName = userName.replace(/[:\/\\?\*\[\]]/g, "_").substring(0, 31);
+      newSheet.setName(sanitizedUserName);
+      // Set the value in cells
+      row[5] !== "" && newSheet.getRange("B2").setValue(row[5]);
+      row[6] !== "" && newSheet.getRange("B3").setValue(row[6]);
+      row[8] !== "" && newSheet.getRange("B7").setValue(row[8]);
+      row[9] !== "" && newSheet.getRange("B13").setValue(row[9]);
+    }
+
+    rowsSelected++;
+  }
+
+
+  const subject = "Daily Report: " + formatExcelDate(todayGMT8.getTime() / 86400000 + 25569);
+
+  // Check if there are rows selected for today
+  if (rowsSelected > 0) {
+    return { subject, emailBody };
+  } else {
+    const subject = "blank";
+    const emailBody = "blank";
+    return { subject, emailBody };
+  }
+}
+
+interface myOutput {
+  subject: string;
+  emailBody: string;
+}
+
+// Define the type for the entries map
+interface Entry {
+  [key: string]: (string | number)[];
+}
+
+
+function formatExcelDate(excelDate: number): string { // Function to format the Excel serial date to a human-readable format
+  let jsDate = new Date((excelDate - 25569) * 86400 * 1000); // Convert Excel date to JS date
+  return jsDate.toLocaleDateString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+}
+
+function deleteExistingSheets(sheets: ExcelScript.Worksheet[]) {
+  // Loop through each sheet
+  sheets.forEach(sheet => {
+    // Get the name of the current sheet
+    let sheetName = sheet.getName();
+
+    // Check if the sheet name is not "Sheet1" or "Template"
+    if (sheetName !== "Sheet1" && sheetName !== "Template") {
+      // Delete the sheet
+      sheet.delete();
+    }
+  });
+}
+
+//https://www.youtube.com/watch?v=eeCqaokSSoQ
